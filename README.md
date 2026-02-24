@@ -53,7 +53,16 @@ A state-of-the-art Clinical Decision Support System (CDSS) and Hospital Manageme
    ```bash
    pip install -r requirements.txt
    ```
-4. Run the development server:
+4. Create a `.env` file from the template:
+   ```bash
+   cp .env.example .env
+   ```
+5. Open `.env` and paste **your own MongoDB Connection String** in the `MONGO_URI` field.
+6. Seed your local database with initial data:
+   ```bash
+   python seed_for_team.py
+   ```
+7. Run the development server:
    ```bash
    python main.py
    ```

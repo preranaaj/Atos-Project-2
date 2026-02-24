@@ -8,6 +8,9 @@ import os
 import motor.motor_asyncio
 from passlib.context import CryptContext
 from datetime import datetime
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = FastAPI(title="Auralis Health Systems API")
 
@@ -50,7 +53,7 @@ import certifi
 
 # Configuration
 DATA_PATH = os.path.join("..", "Patient Vital Signs and Event Tracking", "dummy_obs.csv")
-MONGO_URI = "mongodb+srv://lakshmiyv26:K33sbBE1XmRrEK4r@cluster0.8ecar.mongodb.net/auralis_db?retryWrites=true&w=majority"
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/auralis_db")
 
 # Database Init
 client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URI, tlsCAFile=certifi.where())
