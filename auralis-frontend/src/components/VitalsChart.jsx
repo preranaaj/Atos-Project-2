@@ -13,13 +13,44 @@ const VITALS_META = [
     { key: 'temp', label: 'Temperature', unit: '°C', color: '#f59e0b' },
 ];
 
-const VitalsChart = ({ patientId }) => {
+const VitalsChart = ({ patientId, data: initialData }) => {
     const [data, setData] = useState([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
     const [activeVitals, setActiveVitals] = useState(['heartRate', 'sbp']);
 
+    const formatVitals = (vitals) => {
+        return vitals.map((v, idx) => {
+            let timeStr = '';
+            try {
+                const ts = String(v.timestamp || '');
+                if (ts.includes('T')) {
+                    timeStr = ts.split('T')[1].substring(0, 5);
+                } else if (ts.includes(' ')) {
+                    timeStr = ts.split(' ')[1].substring(0, 5);
+                } else {
+                    timeStr = ts.substring(0, 5) || `T-${(vitals.length - idx)}`;
+                }
+            } catch (e) {
+                timeStr = `P-${idx}`;
+            }
+
+            return {
+                time: timeStr,
+                heartRate: Number(v.hr || 0),
+                sbp: Number(v.sbp || 0),
+                spo2: Number(v.spo2 || 0),
+                temp: Number(v.temp || 0)
+            };
+        });
+    };
+
     useEffect(() => {
+        if (initialData) {
+            setData(formatVitals(initialData));
+            return;
+        }
+
         if (!patientId && patientId !== 0) return;
 
         const loadVitals = async () => {
@@ -31,31 +62,7 @@ const VitalsChart = ({ patientId }) => {
                     setData([]);
                     return;
                 }
-
-                const chartData = vitals.map((v, idx) => {
-                    let timeStr = '';
-                    try {
-                        const ts = String(v.timestamp || '');
-                        if (ts.includes('T')) {
-                            timeStr = ts.split('T')[1].substring(0, 5);
-                        } else if (ts.includes(' ')) {
-                            timeStr = ts.split(' ')[1].substring(0, 5);
-                        } else {
-                            timeStr = ts.substring(0, 5) || `T-${(vitals.length - idx)}`;
-                        }
-                    } catch (e) {
-                        timeStr = `P-${idx}`;
-                    }
-
-                    return {
-                        time: timeStr,
-                        heartRate: Number(v.hr || 0),
-                        sbp: Number(v.sbp || 0),
-                        spo2: Number(v.spo2 || 0),
-                        temp: Number(v.temp || 0)
-                    };
-                });
-                setData(chartData);
+                setData(formatVitals(vitals));
             } catch (err) {
                 console.error("Vitals synchronization error:", err);
                 setError("Telemetry Link Interrupted");
@@ -65,7 +72,7 @@ const VitalsChart = ({ patientId }) => {
         };
 
         loadVitals();
-    }, [patientId]);
+    }, [patientId, initialData]);
 
     const toggleVital = (key) => {
         setActiveVitals(prev =>
@@ -107,8 +114,8 @@ const VitalsChart = ({ patientId }) => {
                         key={v.key}
                         onClick={() => toggleVital(v.key)}
                         className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border-2 transition-all flex items-center gap-2 ${activeVitals.includes(v.key)
-                                ? 'bg-white shadow-sm border-white'
-                                : 'bg-transparent text-slate-400 border-slate-100 opacity-60'
+                            ? 'bg-white shadow-sm border-white'
+                            : 'bg-transparent text-slate-400 border-slate-100 opacity-60'
                             }`}
                         style={activeVitals.includes(v.key) ? { color: v.color, borderColor: `${v.color}40` } : {}}
                     >

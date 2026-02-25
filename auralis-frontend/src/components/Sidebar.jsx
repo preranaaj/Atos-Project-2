@@ -27,7 +27,9 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
             return [
                 { name: 'Control Center', path: '/admin', icon: Shield },
                 { name: 'Analytics', path: '/dashboard', icon: LayoutDashboard },
+                { name: 'Patients', path: '/patients', icon: Users },
                 { name: 'Clinicians', path: '/doctors', icon: Stethoscope },
+                { name: 'Audit Logs', path: '/audit-logs', icon: ClipboardList },
                 { name: 'System Settings', path: '/settings', icon: Settings },
             ];
         }

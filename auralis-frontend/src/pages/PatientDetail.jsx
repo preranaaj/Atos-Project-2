@@ -1,18 +1,21 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     ChevronLeft, Heart, Activity, Wind, Thermometer,
     AlertTriangle, Clock, Calendar, Droplets, TrendingUp,
-    FileText, User, Share2, CheckCircle2
+    FileText, User, Share2, CheckCircle2, CreditCard
 } from 'lucide-react';
 import {
     LineChart, Line, XAxis, YAxis, CartesianGrid,
     Tooltip, ResponsiveContainer, AreaChart, Area
 } from 'recharts';
-import { fetchPatientById, fetchPatientVitals, fetchPatientTimeline, addVitals } from '../lib/api';
+import { fetchPatientById, fetchPatientVitals, fetchPatientTimeline, addVitals, fetchDiagnosis, fetchBills, fetchPatientMLTrends } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
-import { Plus, Save, X } from 'lucide-react';
+import { cn } from '../lib/utils';
+import { Plus, Save, X, LayoutGrid, LineChart as ChartIcon, History as HistoryIcon } from 'lucide-react';
+import VitalsChart from '../components/VitalsChart';
+import MLTrendAnalysis from '../components/MLTrendAnalysis';
 
 const PatientDetail = () => {
     const { id } = useParams();
@@ -20,7 +23,11 @@ const PatientDetail = () => {
     const [patient, setPatient] = useState(null);
     const [vitals, setVitals] = useState([]);
     const [timeline, setTimeline] = useState([]);
+    const [diagnosis, setDiagnosis] = useState([]);
+    const [bills, setBills] = useState([]);
+    const [mlTrends, setMlTrends] = useState({ anomalies: [], trends: [], summary: '' });
     const [loading, setLoading] = useState(true);
+    const [vitalsViewMode, setVitalsViewMode] = useState('grid'); // 'grid' or 'chart'
     const { user } = useAuth();
 
     // Vitals Form State
@@ -37,14 +44,20 @@ const PatientDetail = () => {
 
     const refreshData = async () => {
         try {
-            const [pData, vData, tData] = await Promise.all([
+            const [pData, vData, tData, dData, bData, mlData] = await Promise.all([
                 fetchPatientById(id),
                 fetchPatientVitals(id),
-                fetchPatientTimeline(id)
+                fetchPatientTimeline(id),
+                fetchDiagnosis(id),
+                fetchBills(id),
+                fetchPatientMLTrends(id).catch(() => ({ anomalies: [], trends: [], summary: 'Analysis currently unavailable.' }))
             ]);
             setPatient(pData);
             setVitals(vData);
             setTimeline(tData);
+            setDiagnosis(dData);
+            setBills(bData);
+            setMlTrends(mlData);
         } catch (error) {
             console.error("Failed to load clinical data:", error);
         }
@@ -100,6 +113,13 @@ const PatientDetail = () => {
                     <span className="text-lg font-bold">Clinical Census</span>
                 </button>
                 <div className="flex items-center gap-4">
+                    <Link
+                        to={`/patients/${id}/timeline`}
+                        className="p-3 bg-white hover:bg-slate-50 rounded-2xl transition-all text-slate-600 shadow-sm border border-slate-100 flex items-center gap-2 font-bold"
+                    >
+                        <HistoryIcon className="h-6 w-6 text-primary" />
+                        Clinical Timeline
+                    </Link>
                     {(user?.role === 'Doctor' || user?.role === 'Admin') && (
                         <button
                             onClick={() => setShowVitalsModal(true)}
@@ -178,187 +198,265 @@ const PatientDetail = () => {
                         </div>
                     </motion.div>
 
-                    {/* Precision Vitals Grid */}
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                        {[
-                            { label: 'Heart Rate', value: latestVitals.hr, unit: 'BPM', icon: Heart, color: 'text-rose-500', stroke: '#f43f5e', fill: '#fff1f2', line: 'hr' },
-                            { label: 'Blood Pressure', value: `${latestVitals.sbp}/80`, unit: 'mmHg', icon: Activity, color: 'text-primary', stroke: '#3b82f6', fill: '#eff6ff', line: 'sbp' },
-                            { label: 'SPO2 Sat.', value: latestVitals.spo2, unit: '%', icon: Wind, color: 'text-emerald-500', stroke: '#10b981', fill: '#ecfdf5', line: 'spo2' },
-                            { label: 'Body Temp.', value: latestVitals.temp, unit: '°F', icon: Thermometer, color: 'text-amber-500', stroke: '#f59e0b', fill: '#fffbeb', line: 'temp' },
-                        ].map((stat, i) => (
-                            <motion.div
-                                key={stat.label}
-                                initial={{ opacity: 0, y: 20 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                transition={{ delay: 0.2 + i * 0.1 }}
-                                className="glass-card rounded-[2rem] p-5 clinical-shadow hover:scale-105 transition-all duration-500 border-white/30 overflow-hidden"
-                            >
-                                <div className="mb-4">
-                                    <p className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.15em] mb-3">{stat.label}</p>
-                                    <div className="flex items-center gap-3">
-                                        <div className={`p-3 rounded-2xl bg-white shadow-lg border border-slate-50 ${stat.color}`}>
-                                            <stat.icon className="h-6 w-6" />
-                                        </div>
-                                        <div className="flex flex-col">
-                                            <div className="flex items-baseline gap-1">
-                                                <span className="text-2xl font-black text-slate-800 tracking-tighter leading-none">{stat.value}</span>
-                                                <span className="text-[10px] font-bold text-muted-foreground/60">{stat.unit}</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div className="h-12 w-full -mb-2 opacity-50">
-                                    <ResponsiveContainer width="100%" height="100%">
-                                        <AreaChart data={vitals.slice(-12)}>
-                                            <defs>
-                                                <linearGradient id={`grad-${i}`} x1="0" y1="0" x2="0" y2="1">
-                                                    <stop offset="5%" stopColor={stat.stroke} stopOpacity={0.2} />
-                                                    <stop offset="95%" stopColor={stat.stroke} stopOpacity={0} />
-                                                </linearGradient>
-                                            </defs>
-                                            <Area
-                                                type="monotone"
-                                                dataKey={stat.line}
-                                                stroke={stat.stroke}
-                                                fill={`url(#grad-${i})`}
-                                                strokeWidth={3}
-                                                dot={false}
-                                            />
-                                        </AreaChart>
-                                    </ResponsiveContainer>
-                                </div>
-                            </motion.div>
-                        ))}
-                    </div>
-
-                    {/* Patient Timeline */}
+                    {/* Clinical Longitudinal Insights - Prime placement for clinical assessment */}
                     <motion.div
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: 0.3 }}
-                        className="bg-card rounded-2xl border border-border p-6 shadow-sm"
+                        transition={{ delay: 0.1 }}
+                        className="mb-8"
                     >
-                        <h3 className="text-lg font-bold mb-6 flex items-center gap-2">
-                            <Clock className="h-5 w-5 text-primary" />
-                            Clinical Progression Timeline
-                        </h3>
-                        <div className="relative flex justify-between items-center px-4">
-                            <div className="absolute left-8 right-8 h-0.5 bg-border top-1/2 -translate-y-1/2 -z-10" />
-                            {timeline.slice(-5).map((ev, i) => (
-                                <div key={i} className="flex flex-col items-center gap-2 group cursor-pointer">
-                                    <div className={`h-4 w-4 rounded-full border-2 border-card ${i === 4 ? 'bg-primary ring-4 ring-primary/20 animate-pulse' : 'bg-border'
-                                        }`} />
-                                    <div className="text-center">
-                                        <p className="text-[10px] font-bold text-muted-foreground whitespace-nowrap">Day {i + 1}</p>
-                                        <p className="text-xs font-semibold whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity">
-                                            {ev.event}
-                                        </p>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
+                        <MLTrendAnalysis
+                            trends={mlTrends.trends}
+                            anomalies={mlTrends.anomalies}
+                            summary={mlTrends.summary}
+                        />
                     </motion.div>
 
-                    {/* ML Risk Analysis Chart */}
-                    <motion.div
-                        initial={{ opacity: 0, scale: 0.98 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        transition={{ delay: 0.4 }}
-                        className="bg-card rounded-2xl border border-border p-6 shadow-sm overflow-hidden"
-                    >
-                        <div className="flex items-center justify-between mb-8">
-                            <div>
-                                <h3 className="text-lg font-bold">Predictive Risk Analysis</h3>
-                                <p className="text-xs text-muted-foreground mt-1">AI-driven Cardiac Event Probability (Next 24 Hours)</p>
+                    {/* Precision Vitals Section */}
+                    <div className="space-y-4">
+                        <div className="flex items-center justify-between px-4">
+                            <h3 className="text-xl font-black text-slate-800 tracking-tight">Physiological Telemetry</h3>
+                            <div className="flex items-center gap-1 bg-white/50 p-1 rounded-xl border border-white/20 backdrop-blur-sm">
+                                <button
+                                    onClick={() => setVitalsViewMode('grid')}
+                                    className={cn(
+                                        "p-2 rounded-lg transition-all flex items-center gap-2 text-[10px] font-black uppercase tracking-widest",
+                                        vitalsViewMode === 'grid' ? "bg-white text-primary shadow-sm" : "text-slate-400 hover:text-slate-600"
+                                    )}
+                                >
+                                    <LayoutGrid className="h-3.5 w-3.5" /> Grid
+                                </button>
+                                <button
+                                    onClick={() => setVitalsViewMode('chart')}
+                                    className={cn(
+                                        "p-2 rounded-lg transition-all flex items-center gap-2 text-[10px] font-black uppercase tracking-widest",
+                                        vitalsViewMode === 'chart' ? "bg-white text-primary shadow-sm" : "text-slate-400 hover:text-slate-600"
+                                    )}
+                                >
+                                    <ChartIcon className="h-3.5 w-3.5" /> Analytics
+                                </button>
                             </div>
-                            <div className="flex gap-2">
-                                <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
-                                    <span className="h-2 w-2 rounded-full bg-red-400" />
-                                    Critical Zone
-                                </span>
+                        </div>
+
+                        <AnimatePresence mode="wait">
+                            {vitalsViewMode === 'grid' ? (
+                                <motion.div
+                                    key="grid"
+                                    initial={{ opacity: 0, y: 10 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={{ opacity: 0, y: -10 }}
+                                    className="grid grid-cols-2 lg:grid-cols-4 gap-4"
+                                >
+                                    {[
+                                        { label: 'Heart Rate', value: latestVitals.hr, unit: 'BPM', icon: Heart, color: 'text-rose-500', stroke: '#f43f5e', fill: '#fff1f2', line: 'hr' },
+                                        { label: 'Blood Pressure', value: `${latestVitals.sbp}/80`, unit: 'mmHg', icon: Activity, color: 'text-primary', stroke: '#3b82f6', fill: '#eff6ff', line: 'sbp' },
+                                        { label: 'SPO2 Sat.', value: latestVitals.spo2, unit: '%', icon: Wind, color: 'text-emerald-500', stroke: '#10b981', fill: '#ecfdf5', line: 'spo2' },
+                                        { label: 'Body Temp.', value: latestVitals.temp, unit: '°F', icon: Thermometer, color: 'text-amber-500', stroke: '#f59e0b', fill: '#fffbeb', line: 'temp' },
+                                    ].map((stat, i) => (
+                                        <div
+                                            key={stat.label}
+                                            className="glass-card rounded-[2rem] p-5 clinical-shadow hover:scale-105 transition-all duration-500 border-white/30 overflow-hidden"
+                                        >
+                                            <div className="mb-4">
+                                                <p className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.15em] mb-3">{stat.label}</p>
+                                                <div className="flex items-center gap-3">
+                                                    <div className={`p-3 rounded-2xl bg-white shadow-lg border border-slate-50 ${stat.color}`}>
+                                                        <stat.icon className="h-6 w-6" />
+                                                    </div>
+                                                    <div className="flex flex-col">
+                                                        <div className="flex items-baseline gap-1">
+                                                            <span className="text-2xl font-black text-slate-800 tracking-tighter leading-none">{stat.value}</span>
+                                                            <span className="text-[10px] font-bold text-muted-foreground/60">{stat.unit}</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div className="h-12 w-full -mb-2 opacity-50">
+                                                <ResponsiveContainer width="100%" height="100%">
+                                                    <AreaChart data={vitals.slice(-12)}>
+                                                        <defs>
+                                                            <linearGradient id={`grad-${i}`} x1="0" y1="0" x2="0" y2="1">
+                                                                <stop offset="5%" stopColor={stat.stroke} stopOpacity={0.2} />
+                                                                <stop offset="95%" stopColor={stat.stroke} stopOpacity={0} />
+                                                            </linearGradient>
+                                                        </defs>
+                                                        <Area
+                                                            type="monotone"
+                                                            dataKey={stat.line}
+                                                            stroke={stat.stroke}
+                                                            fill={`url(#grad-${i})`}
+                                                            strokeWidth={3}
+                                                            dot={false}
+                                                        />
+                                                    </AreaChart>
+                                                </ResponsiveContainer>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </motion.div>
+                            ) : (
+                                <motion.div
+                                    key="chart"
+                                    initial={{ opacity: 0, y: 10 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={{ opacity: 0, y: -10 }}
+                                    className="glass-card rounded-[3rem] p-10 clinical-shadow border-white/40 h-[500px]"
+                                >
+                                    <VitalsChart data={vitals} patientId={id} />
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
+
+                        {/* ML Risk Analysis Chart */}
+                        <motion.div
+                            initial={{ opacity: 0, scale: 0.98 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            transition={{ delay: 0.4 }}
+                            className="bg-card rounded-2xl border border-border p-6 shadow-sm overflow-hidden"
+                        >
+                            <div className="flex items-center justify-between mb-8">
+                                <div>
+                                    <h3 className="text-lg font-bold">Predictive Risk Analysis</h3>
+                                    <p className="text-xs text-muted-foreground mt-1">AI-driven Cardiac Event Probability (Next 24 Hours)</p>
+                                </div>
+                                <div className="flex gap-2">
+                                    <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
+                                        <span className="h-2 w-2 rounded-full bg-red-400" />
+                                        Critical Zone
+                                    </span>
+                                </div>
+                            </div>
+                            <div className="h-64 w-full">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <AreaChart data={[
+                                        { time: 'T-12', risk: 15 }, { time: 'T-10', risk: 20 }, { time: 'T-8', risk: 18 },
+                                        { time: 'T-6', risk: 25 }, { time: 'T-4', risk: 45 }, { time: 'T-2', risk: 62 },
+                                        { time: 'Today', risk: 85 },
+                                    ]}>
+                                        <defs>
+                                            <linearGradient id="colorRisk" x1="0" y1="0" x2="0" y2="1">
+                                                <stop offset="5%" stopColor="#ef4444" stopOpacity={0.1} />
+                                                <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
+                                            </linearGradient>
+                                        </defs>
+                                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                        <XAxis dataKey="time" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#94a3b8' }} />
+                                        <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#94a3b8' }} />
+                                        <Tooltip
+                                            contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}
+                                        />
+                                        <Area
+                                            type="monotone"
+                                            dataKey="risk"
+                                            stroke="#ef4444"
+                                            strokeWidth={3}
+                                            fillOpacity={1}
+                                            fill="url(#colorRisk)"
+                                        />
+                                    </AreaChart>
+                                </ResponsiveContainer>
+                            </div>
+                            <div className="mt-4 p-4 bg-secondary/30 rounded-xl flex items-center justify-between">
+                                <p className="text-sm font-medium">Rising Risk of Cardiac Event Detected</p>
+                                <span className="text-lg font-black text-red-600">85%</span>
+                            </div>
+                        </motion.div>
+                        {/* Clinical Findings & Billing Context */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="bg-card rounded-[2rem] border border-border p-8 shadow-sm space-y-6">
+                                <h3 className="text-xl font-black text-slate-800 tracking-tight flex items-center gap-2">
+                                    <FileText className="h-5 w-5 text-primary" /> Clinical Findings
+                                </h3>
+                                <div className="space-y-4 max-h-[300px] overflow-y-auto no-scrollbar pr-2">
+                                    {diagnosis.length > 0 ? diagnosis.map((d, i) => (
+                                        <div key={i} className="p-5 bg-slate-50 rounded-2xl border border-slate-100 space-y-2">
+                                            <div className="flex justify-between items-center">
+                                                <p className="font-black text-primary text-sm">{d.diagnosis}</p>
+                                                <p className="text-[10px] font-bold text-muted-foreground">{new Date(d.timestamp).toLocaleDateString()}</p>
+                                            </div>
+                                            <p className="text-[10px] font-bold text-slate-500 italic">"{d.symptoms}"</p>
+                                            <div className="pt-2 border-t border-slate-200">
+                                                <p className="text-[10px] font-black uppercase text-indigo-600">Prescription: {d.prescription}</p>
+                                            </div>
+                                        </div>
+                                    )) : (
+                                        <p className="text-sm font-medium text-muted-foreground italic text-center py-10">No clinical findings recorded.</p>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="bg-card rounded-[2rem] border border-border p-8 shadow-sm space-y-6">
+                                <h3 className="text-xl font-black text-slate-800 tracking-tight flex items-center gap-2">
+                                    <CreditCard className="h-5 w-5 text-emerald-500" /> Administrative Billing
+                                </h3>
+                                {bills.length > 0 ? bills.map((b, i) => (
+                                    <div key={i} className="flex items-center justify-between p-4 bg-emerald-50/30 rounded-2xl border border-emerald-100">
+                                        <div>
+                                            <p className="text-xs font-black text-slate-800">{b.service_name}</p>
+                                            <p className="text-[10px] font-bold text-slate-400">{b.service_date}</p>
+                                        </div>
+                                        <div className="text-right">
+                                            <p className="text-sm font-black text-emerald-600">₹{b.total_cost}</p>
+                                            <span className={cn(
+                                                "text-[8px] font-black uppercase px-2 py-0.5 rounded-full",
+                                                b.status === 'Paid' ? "bg-emerald-500 text-white" : "bg-amber-100 text-amber-600"
+                                            )}>{b.status}</span>
+                                        </div>
+                                    </div>
+                                )) : (
+                                    <p className="text-sm font-medium text-muted-foreground italic text-center py-10">No billing history found.</p>
+                                )}
                             </div>
                         </div>
-                        <div className="h-64 w-full">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <AreaChart data={[
-                                    { time: 'T-12', risk: 15 }, { time: 'T-10', risk: 20 }, { time: 'T-8', risk: 18 },
-                                    { time: 'T-6', risk: 25 }, { time: 'T-4', risk: 45 }, { time: 'T-2', risk: 62 },
-                                    { time: 'Today', risk: 85 },
-                                ]}>
-                                    <defs>
-                                        <linearGradient id="colorRisk" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="5%" stopColor="#ef4444" stopOpacity={0.1} />
-                                            <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
-                                        </linearGradient>
-                                    </defs>
-                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                                    <XAxis dataKey="time" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#94a3b8' }} />
-                                    <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#94a3b8' }} />
-                                    <Tooltip
-                                        contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}
-                                    />
-                                    <Area
-                                        type="monotone"
-                                        dataKey="risk"
-                                        stroke="#ef4444"
-                                        strokeWidth={3}
-                                        fillOpacity={1}
-                                        fill="url(#colorRisk)"
-                                    />
-                                </AreaChart>
-                            </ResponsiveContainer>
-                        </div>
-                        <div className="mt-4 p-4 bg-secondary/30 rounded-xl flex items-center justify-between">
-                            <p className="text-sm font-medium">Rising Risk of Cardiac Event Detected</p>
-                            <span className="text-lg font-black text-red-600">85%</span>
-                        </div>
-                    </motion.div>
+                    </div>
                 </div>
 
                 {/* RIGHT COLUMN: Alerts & Metadata */}
                 <div className="space-y-6">
 
                     {/* Immersive Risk Alerts */}
-                    <motion.div
-                        initial={{ opacity: 0, x: 20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        className="clinical-gradient rounded-[2.5rem] p-8 text-white shadow-2xl clinical-shadow relative overflow-hidden group"
-                    >
-                        <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:scale-125 transition-transform duration-700">
-                            <AlertTriangle className="h-32 w-32" />
-                        </div>
-                        <div className="relative z-10">
-                            <div className="flex items-center gap-3 mb-8">
-                                <div className="h-2 w-2 rounded-full bg-white animate-ping" />
-                                <h4 className="text-sm font-black uppercase tracking-[0.2em] text-white/80">Critical Path Analysis</h4>
+                    {(patient.status === 'Critical' || (mlTrends.anomalies && mlTrends.anomalies.some(a => a.severity === 'High'))) && (
+                        <motion.div
+                            initial={{ opacity: 0, x: 20 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            className="clinical-gradient rounded-[2.5rem] p-8 text-white shadow-2xl clinical-shadow relative overflow-hidden group"
+                        >
+                            <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:scale-125 transition-transform duration-700">
+                                <AlertTriangle className="h-32 w-32" />
                             </div>
-                            <div className="bg-white/10 backdrop-blur-2xl rounded-[1.5rem] p-6 border border-white/20 mb-8">
-                                <div className="flex items-center gap-4 mb-4">
-                                    <div className="p-3 bg-rose-500 rounded-2xl shadow-lg ring-4 ring-rose-500/30">
-                                        <Activity className="h-8 w-8 text-white" />
+                            <div className="relative z-10">
+                                <div className="flex items-center gap-3 mb-8">
+                                    <div className="h-2 w-2 rounded-full bg-white animate-ping" />
+                                    <h4 className="text-sm font-black uppercase tracking-[0.2em] text-white/80">Critical Path Analysis</h4>
+                                </div>
+                                <div className="bg-white/10 backdrop-blur-2xl rounded-[1.5rem] p-6 border border-white/20 mb-8">
+                                    <div className="flex items-center gap-4 mb-4">
+                                        <div className="p-3 bg-rose-500 rounded-2xl shadow-lg ring-4 ring-rose-500/30">
+                                            <Activity className="h-8 w-8 text-white" />
+                                        </div>
+                                        <div>
+                                            <p className="text-2xl font-black italic tracking-tight">HIGH VULNERABILITY</p>
+                                            <p className="text-xs font-bold text-white/70 uppercase tracking-widest">Cardiac Event Threat</p>
+                                        </div>
                                     </div>
-                                    <div>
-                                        <p className="text-2xl font-black italic tracking-tight">HIGH VULNERABILITY</p>
-                                        <p className="text-xs font-bold text-white/70 uppercase tracking-widest">Cardiac Event Threat</p>
+                                    <p className="text-base font-bold text-white/90 leading-relaxed mb-4">
+                                        Real-time analysis indicates a <span className="text-white underline underline-offset-4 decoration-rose-300">significant risk</span> based on current biomarker trends.
+                                    </p>
+                                    <div className="h-2 w-full bg-white/10 rounded-full overflow-hidden">
+                                        <motion.div
+                                            initial={{ width: 0 }}
+                                            animate={{ width: (patient.status === 'Critical' ? '95%' : '85%') }}
+                                            className="h-full bg-rose-400"
+                                        />
                                     </div>
                                 </div>
-                                <p className="text-base font-bold text-white/90 leading-relaxed mb-4">
-                                    Real-time analysis indicates an <span className="text-white underline underline-offset-4 decoration-rose-300">85% probability</span> based on current biomarker trends.
-                                </p>
-                                <div className="h-2 w-full bg-white/10 rounded-full overflow-hidden">
-                                    <motion.div
-                                        initial={{ width: 0 }}
-                                        animate={{ width: '85%' }}
-                                        className="h-full bg-rose-400"
-                                    />
-                                </div>
+                                <button className="w-full bg-white text-primary py-5 rounded-2xl font-black text-lg flex items-center justify-center gap-3 hover:bg-slate-50 transition-all shadow-xl active:scale-95">
+                                    <TrendingUp className="h-6 w-6" />
+                                    ESCALATE CARE
+                                </button>
                             </div>
-                            <button className="w-full bg-white text-primary py-5 rounded-2xl font-black text-lg flex items-center justify-center gap-3 hover:bg-slate-50 transition-all shadow-xl active:scale-95">
-                                <TrendingUp className="h-6 w-6" />
-                                ESCALATE CARE
-                            </button>
-                        </div>
-                    </motion.div>
+                        </motion.div>
+                    )}
 
                     {/* Vitals Summary Card */}
                     <div className="bg-card rounded-2xl border border-border p-6 shadow-sm">
@@ -495,8 +593,9 @@ const PatientDetail = () => {
                     </div>
                 )}
             </AnimatePresence>
-        </div>
+        </div >
     );
 };
+
 
 export default PatientDetail;

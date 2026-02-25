@@ -179,3 +179,14 @@ export const submitBill = async (patientId, data) => {
     if (!response.ok) throw new Error('Failed to generate bill');
     return response.json();
 };
+export const fetchAuditLogs = async () => {
+    const response = await fetch(`${BASE_URL}/admin/audit-logs`);
+    if (!response.ok) throw new Error('Failed to fetch audit logs');
+    return response.json();
+};
+
+export const fetchPatientMLTrends = async (id) => {
+    const response = await fetch(`${BASE_URL}/patients/${id}/ml-trends`);
+    if (!response.ok) throw new Error('Failed to fetch ML trends');
+    return response.json();
+};

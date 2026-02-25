@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     Calendar, Clock, User, Phone, Mail, MapPin,
@@ -18,6 +19,8 @@ import {
 } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { cn } from '../lib/utils';
+import VitalsChart from '../components/VitalsChart';
+import { LayoutList, LineChart as ChartIcon } from 'lucide-react';
 
 const Appointments = () => {
     const { user } = useAuth();
@@ -32,6 +35,7 @@ const Appointments = () => {
     const [diagnosis, setDiagnosis] = useState([]);
     const [bills, setBills] = useState([]);
     const [activeTab, setActiveTab] = useState('Charts');
+    const [vitalsTabMode, setVitalsTabMode] = useState('list'); // 'list' or 'chart'
 
     // Modals
     const [showVitalsModal, setShowVitalsModal] = useState(false);
@@ -297,7 +301,29 @@ const Appointments = () => {
                                     {activeTab === 'Vital Signs' && (
                                         <div className="space-y-6 h-full flex flex-col">
                                             <div className="flex justify-between items-center">
-                                                <h3 className="text-2xl font-black text-slate-800 tracking-tight">Physiological Log</h3>
+                                                <div className="flex items-center gap-6">
+                                                    <h3 className="text-2xl font-black text-slate-800 tracking-tight">Physiological Log</h3>
+                                                    <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
+                                                        <button
+                                                            onClick={() => setVitalsTabMode('list')}
+                                                            className={cn(
+                                                                "p-2 rounded-lg transition-all flex items-center gap-2 text-[10px] font-black uppercase tracking-widest",
+                                                                vitalsTabMode === 'list' ? "bg-white text-primary shadow-sm" : "text-slate-400 hover:text-slate-600"
+                                                            )}
+                                                        >
+                                                            <LayoutList className="h-3.5 w-3.5" /> List
+                                                        </button>
+                                                        <button
+                                                            onClick={() => setVitalsTabMode('chart')}
+                                                            className={cn(
+                                                                "p-2 rounded-lg transition-all flex items-center gap-2 text-[10px] font-black uppercase tracking-widest",
+                                                                vitalsTabMode === 'chart' ? "bg-white text-primary shadow-sm" : "text-slate-400 hover:text-slate-600"
+                                                            )}
+                                                        >
+                                                            <ChartIcon className="h-3.5 w-3.5" /> Charts
+                                                        </button>
+                                                    </div>
+                                                </div>
                                                 <button
                                                     onClick={() => setShowVitalsModal(true)}
                                                     className="px-6 py-2.5 bg-primary text-white rounded-xl font-black text-xs uppercase tracking-widest flex items-center gap-2 shadow-lg"
@@ -305,26 +331,49 @@ const Appointments = () => {
                                                     <Plus className="h-4 w-4" /> Add Vitals
                                                 </button>
                                             </div>
-                                            <div className="flex-1 overflow-y-auto no-scrollbar space-y-4">
-                                                {vitals.map((v, i) => (
-                                                    <div key={i} className="p-6 bg-slate-50 rounded-[1.5rem] border border-slate-100 flex items-center justify-between">
-                                                        <div className="flex items-center gap-6">
-                                                            <div className="p-3 bg-white rounded-xl shadow-sm border border-slate-100">
-                                                                <Clock className="h-5 w-5 text-primary" />
-                                                            </div>
-                                                            <div>
-                                                                <p className="font-black text-lg text-slate-800">{new Date(v.timestamp).toLocaleString()}</p>
-                                                                <p className="text-xs font-bold text-muted-foreground uppercase">{v.note || 'Regular Checkup'}</p>
-                                                            </div>
-                                                        </div>
-                                                        <div className="grid grid-cols-4 gap-4 text-center">
-                                                            <div><p className="text-[10px] font-black text-muted-foreground uppercase mb-1">BP</p><p className="font-black text-primary">{v.sbp}/{v.dbp || 80}</p></div>
-                                                            <div><p className="text-[10px] font-black text-muted-foreground uppercase mb-1">HR</p><p className="font-black text-rose-500">{v.hr}</p></div>
-                                                            <div><p className="text-[10px] font-black text-muted-foreground uppercase mb-1">Temp</p><p className="font-black text-amber-500">{v.temp}°F</p></div>
-                                                            <div><p className="text-[10px] font-black text-muted-foreground uppercase mb-1">SpO2</p><p className="font-black text-emerald-500">{v.spo2}%</p></div>
-                                                        </div>
-                                                    </div>
-                                                ))}
+
+                                            <div className="flex-1 overflow-y-auto no-scrollbar">
+                                                <AnimatePresence mode="wait">
+                                                    {vitalsTabMode === 'list' ? (
+                                                        <motion.div
+                                                            key="vitals-list"
+                                                            initial={{ opacity: 0, x: -10 }}
+                                                            animate={{ opacity: 1, x: 0 }}
+                                                            exit={{ opacity: 0, x: 10 }}
+                                                            className="space-y-4"
+                                                        >
+                                                            {vitals.map((v, i) => (
+                                                                <div key={i} className="p-6 bg-slate-50 rounded-[1.5rem] border border-slate-100 flex items-center justify-between">
+                                                                    <div className="flex items-center gap-6">
+                                                                        <div className="p-3 bg-white rounded-xl shadow-sm border border-slate-100">
+                                                                            <Clock className="h-5 w-5 text-primary" />
+                                                                        </div>
+                                                                        <div>
+                                                                            <p className="font-black text-lg text-slate-800">{new Date(v.timestamp).toLocaleString()}</p>
+                                                                            <p className="text-xs font-bold text-muted-foreground uppercase">{v.note || 'Regular Checkup'}</p>
+                                                                        </div>
+                                                                    </div>
+                                                                    <div className="grid grid-cols-4 gap-4 text-center">
+                                                                        <div><p className="text-[10px] font-black text-muted-foreground uppercase mb-1">BP</p><p className="font-black text-primary">{v.sbp}/{v.dbp || 80}</p></div>
+                                                                        <div><p className="text-[10px] font-black text-muted-foreground uppercase mb-1">HR</p><p className="font-black text-rose-500">{v.hr}</p></div>
+                                                                        <div><p className="text-[10px] font-black text-muted-foreground uppercase mb-1">Temp</p><p className="font-black text-amber-500">{v.temp}°F</p></div>
+                                                                        <div><p className="text-[10px] font-black text-muted-foreground uppercase mb-1">SpO2</p><p className="font-black text-emerald-500">{v.spo2}%</p></div>
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </motion.div>
+                                                    ) : (
+                                                        <motion.div
+                                                            key="vitals-chart"
+                                                            initial={{ opacity: 0, x: 10 }}
+                                                            animate={{ opacity: 1, x: 0 }}
+                                                            exit={{ opacity: 0, x: -10 }}
+                                                            className="h-[500px] w-full bg-slate-50/50 rounded-[2rem] p-8 border border-slate-100"
+                                                        >
+                                                            <VitalsChart data={vitals} patientId={selectedApt?.patient_id} />
+                                                        </motion.div>
+                                                    )}
+                                                </AnimatePresence>
                                             </div>
                                         </div>
                                     )}
@@ -557,7 +606,13 @@ const Appointments = () => {
                                     </div>
                                 </div>
 
-                                <div className="pt-2">
+                                <div className="pt-2 space-y-3">
+                                    <Link
+                                        to={`/patients/${selectedApt?.patient_id}/timeline`}
+                                        className="w-full py-4 rounded-2xl bg-white border-2 border-slate-100 text-slate-600 font-black text-[10px] uppercase tracking-widest hover:border-primary hover:text-primary transition-all shadow-sm flex items-center justify-center gap-2"
+                                    >
+                                        <HistoryIcon className="h-4 w-4" /> Full Narrative Timeline
+                                    </Link>
                                     <button className="w-full py-4 rounded-2xl bg-primary text-white font-black text-[10px] uppercase tracking-widest hover:brightness-110 transition-all shadow-lg shadow-primary/20">
                                         Export Clinical Dossier
                                     </button>
@@ -594,7 +649,7 @@ const Appointments = () => {
                     </div>
                 )}
             </AnimatePresence>
-        </div>
+        </div >
     );
 };
 
@@ -828,5 +883,13 @@ const HistoryModal = ({ visible, onClose, patientId, initialData, onRefresh }) =
         </div>
     );
 };
+
+const HistoryIcon = ({ className }) => (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+        <path d="M3 3v5h5" />
+        <path d="M12 7v5l4 2" />
+    </svg>
+);
 
 export default Appointments;

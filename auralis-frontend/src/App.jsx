@@ -15,6 +15,8 @@ import DoctorDetail from './pages/DoctorDetail';
 import PatientPortal from './pages/PatientPortal';
 import AdminCommand from './pages/AdminCommand';
 import Appointments from './pages/Appointments';
+import AuditLogs from './pages/AuditLogs';
+import PatientTimeline from './pages/PatientTimeline';
 
 // Protected Route Wrapper
 const ProtectedRoute = () => {
@@ -41,8 +43,10 @@ function App() {
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/portal" element={<PatientPortal />} />
               <Route path="/admin" element={<AdminCommand />} />
+              <Route path="/audit-logs" element={<AuditLogs />} />
               <Route path="/patients" element={<Patients />} />
               <Route path="/patients/:id" element={<PatientDetail />} />
+              <Route path="/patients/:id/timeline" element={<PatientTimeline />} />
               <Route path="/analytics" element={<Analytics />} />
               <Route path="/schedule" element={<Schedule />} />
               <Route path="/appointments" element={<Appointments />} />

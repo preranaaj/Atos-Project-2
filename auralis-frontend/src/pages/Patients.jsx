@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Search, Filter, MoreHorizontal, User, AlertCircle, CheckCircle2, Clock, X, Save, UserPlus, Edit2, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { fetchPatients, addPatient, updatePatient, deletePatient } from '../lib/api';
+import { useAuth } from '../context/AuthContext';
 
 const StatusBadge = ({ status }) => {
     const styles = {
@@ -222,6 +223,7 @@ const PatientModal = ({ isOpen, onClose, onSubmit, initialData = null, title = "
 
 const Patients = () => {
     const navigate = useNavigate();
+    const { user: currentUser } = useAuth();
     const [patients, setPatients] = useState([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
@@ -246,7 +248,8 @@ const Patients = () => {
 
     const handleAdmit = async (formData) => {
         try {
-            await addPatient(formData);
+            const dataWithUser = { ...formData, performed_by: currentUser?.name || "Unknown Doctor" };
+            await addPatient(dataWithUser);
             setIsModalOpen(false);
             loadPatients();
         } catch (error) {
@@ -256,7 +259,8 @@ const Patients = () => {
 
     const handleUpdate = async (formData) => {
         try {
-            await updatePatient(editingPatient.id, formData);
+            const dataWithUser = { ...formData, performed_by: currentUser?.name || "Unknown Doctor" };
+            await updatePatient(editingPatient.id, dataWithUser);
             setEditingPatient(null);
             loadPatients();
         } catch (error) {

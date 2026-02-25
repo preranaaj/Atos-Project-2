@@ -151,6 +151,7 @@ class PatientBase(BaseModel):
     email: Optional[str] = ""
     address: Optional[str] = ""
     medical_history: Optional[str] = "None reported"
+    performed_by: Optional[str] = None
 
 class PatientCreate(PatientBase):
     pass
@@ -169,6 +170,7 @@ class PatientUpdate(BaseModel):
     email: Optional[str] = None
     address: Optional[str] = None
     medical_history: Optional[str] = None
+    performed_by: Optional[str] = None
 
 class ReviewCreate(BaseModel):
     doctor_id: str
@@ -180,6 +182,24 @@ class ReviewCreate(BaseModel):
 class ReviewResponse(ReviewCreate):
     id: str
     created_at: datetime
+
+class AuditLogCreate(BaseModel):
+    user_id: str
+    username: str
+    role: str
+    action: str
+    details: Optional[str] = ""
+
+async def log_action(username: str, action: str, role: str, user_id: str = "system", details: str = ""):
+    log_entry = {
+        "user_id": user_id,
+        "username": username,
+        "role": role,
+        "action": action,
+        "details": details,
+        "timestamp": datetime.utcnow()
+    }
+    await db.audit_logs.insert_one(log_entry)
 
 # Load CSV data
 try:
@@ -369,6 +389,16 @@ async def login(user_data: UserLogin):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
     
     print(f"DEBUG: Login successful for {search_email}")
+    
+    # Log the login action
+    await log_action(
+        username=user["name"],
+        action="Login",
+        role=user.get("role", "User"),
+        user_id=str(user["_id"]) if "_id" in user else user.get("id"),
+        details=f"Successful login from {col_name} collection"
+    )
+
     return {
         "id": str(user["_id"]) if "_id" in user else user.get("id"),
         "name": user["name"],
@@ -424,6 +454,15 @@ async def admit_patient(patient: PatientCreate):
     patient_dict["lastCheck"] = str(datetime.utcnow())
     
     result = await db.patients.insert_one(patient_dict)
+    
+    # Log the action
+    await log_action(
+        username=patient.performed_by or "System/Admin",
+        action="Patient Admitted",
+        role="Doctor/Admin",
+        details=f"Admitted patient: {patient.name}"
+    )
+
     patient_dict["id"] = str(result.inserted_id)
     del patient_dict["_id"]
     return patient_dict
@@ -447,6 +486,14 @@ async def update_patient(patient_id: str, patient_update: PatientUpdate):
         
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Patient not found")
+        
+    # Log the update action
+    await log_action(
+        username=patient_update.performed_by or "System/Admin",
+        action="Patient Record Updated",
+        role="Doctor/Admin",
+        details=f"Updated details for patient ID: {patient_id}"
+    )
             
     return {"message": "Patient updated successfully"}
 
@@ -577,6 +624,75 @@ async def get_patient_vitals(patient_id: str):
         return history
         
     return csv_vitals + db_vitals
+
+@app.get("/patients/{patient_id}/ml-trends")
+async def get_patient_ml_trends(patient_id: str):
+    vitals_data = await get_patient_vitals(patient_id)
+    if not vitals_data or len(vitals_data) < 3:
+        return {"anomalies": [], "trends": [], "summary": "Insufficient data for ML analysis."}
+
+    v_df = pd.DataFrame(vitals_data)
+    v_df['timestamp'] = pd.to_datetime(v_df['timestamp'])
+    v_df = v_df.sort_values('timestamp')
+
+    anomalies = []
+    trends = []
+    
+    metrics = ['hr', 'sbp', 'temp', 'spo2']
+    names = {'hr': 'Heart Rate', 'sbp': 'Blood Pressure', 'temp': 'Temperature', 'spo2': 'Oxygen Saturation'}
+    
+    for metric in metrics:
+        if metric not in v_df.columns: continue
+        
+        # 1. Anomaly Detection (Simple Z-score)
+        mean = v_df[metric].mean()
+        std = v_df[metric].std()
+        
+        if std > 0:
+            v_df[f'{metric}_zscore'] = (v_df[metric] - mean) / std
+            metric_anomalies = v_df[v_df[f'{metric}_zscore'].abs() > 2]
+            
+            for _, row in metric_anomalies.iterrows():
+                anomalies.append({
+                    "metric": metric,
+                    "label": names[metric],
+                    "value": row[metric],
+                    "timestamp": row['timestamp'].isoformat(),
+                    "severity": "High" if abs(row[f'{metric}_zscore']) > 3 else "Medium",
+                    "type": "Spike" if row[f'{metric}_zscore'] > 0 else "Drop"
+                })
+
+        # 2. Trend Analysis (Moving Average Comparison)
+        if len(v_df) >= 5:
+            last_5 = v_df[metric].tail(5).mean()
+            prev_5 = v_df[metric].iloc[-10:-5].mean() if len(v_df) >= 10 else mean
+            
+            diff_pct = ((last_5 - prev_5) / prev_5) * 100 if prev_5 != 0 else 0
+            
+            if abs(diff_pct) > 10:
+                trends.append({
+                    "metric": metric,
+                    "label": names[metric],
+                    "direction": "Upward" if diff_pct > 0 else "Downward",
+                    "change_pct": round(diff_pct, 1),
+                    "insight": f"{names[metric]} is showing a significant { 'upward' if diff_pct > 0 else 'downward' } progression."
+                })
+
+    # Summary Generation
+    critical_count = len([a for a in anomalies if a['severity'] == "High"])
+    if critical_count > 0:
+        summary = f"Detected {critical_count} critical physiological anomalies. Immediate review recommended."
+    elif trends:
+        summary = f"Longitudinal patterns indicate {len(trends)} notable shifts in patient stability."
+    else:
+        summary = "Patient physiological data remains within baseline clusters."
+
+    return {
+        "anomalies": anomalies,
+        "trends": trends,
+        "summary": summary,
+        "ml_version": "v1.0.anomaly-z"
+    }
 
 @app.get("/patients/{patient_id}/timeline")
 async def get_patient_timeline(patient_id: str):
@@ -739,6 +855,18 @@ async def get_admin_stats():
         "uptime": "99.9%"
     }
 
+@app.get("/admin/audit-logs")
+async def get_audit_logs():
+    logs = []
+    async for log in db.audit_logs.find().sort("timestamp", -1).limit(100):
+        log["id"] = str(log["_id"])
+        del log["_id"]
+        # Convert datetime to ISO string for frontend
+        if isinstance(log.get("timestamp"), datetime):
+            log["dateTime"] = log["timestamp"].isoformat()
+        logs.append(log)
+    return logs
+
 @app.delete("/admin/users/{user_id}")
 async def delete_user(user_id: str):
     from bson import ObjectId
@@ -804,4 +932,5 @@ async def update_appointment(appointment_id: str, update: AppointmentUpdate):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    # Use string for app and enable reload for better development experience
+    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
