@@ -26,7 +26,6 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
         if (user?.role === 'Admin') {
             return [
                 { name: 'Control Center', path: '/admin', icon: Shield },
-                { name: 'Analytics', path: '/dashboard', icon: LayoutDashboard },
                 { name: 'Patients', path: '/patients', icon: Users },
                 { name: 'Clinicians', path: '/doctors', icon: Stethoscope },
                 { name: 'Audit Logs', path: '/audit-logs', icon: ClipboardList },
@@ -38,7 +37,6 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
                 { name: 'Dashboard', path: '/dashboard', icon: LayoutDashboard },
                 { name: 'Appointments', path: '/appointments', icon: ClipboardList },
                 { name: 'Patients', path: '/patients', icon: Users },
-                { name: 'Analytics', path: '/analytics', icon: PieChart },
                 { name: 'Schedule', path: '/schedule', icon: Calendar },
                 { name: 'Settings', path: '/settings', icon: Settings },
             ];
@@ -47,7 +45,6 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
         return [
             { name: 'My Health', path: '/portal', icon: Heart },
             { name: 'Appointments', path: '/schedule', icon: Calendar },
-            { name: 'Medical Records', path: '/patients', icon: FileText },
             { name: 'Settings', path: '/settings', icon: Settings },
         ];
     };

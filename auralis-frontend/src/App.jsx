@@ -7,7 +7,6 @@ import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
 import Patients from './pages/Patients';
 import PatientDetail from './pages/PatientDetail';
-import Analytics from './pages/Analytics';
 import Schedule from './pages/Schedule';
 import Settings from './pages/Settings';
 import Doctors from './pages/Doctors';
@@ -47,7 +46,6 @@ function App() {
               <Route path="/patients" element={<Patients />} />
               <Route path="/patients/:id" element={<PatientDetail />} />
               <Route path="/patients/:id/timeline" element={<PatientTimeline />} />
-              <Route path="/analytics" element={<Analytics />} />
               <Route path="/schedule" element={<Schedule />} />
               <Route path="/appointments" element={<Appointments />} />
               <Route path="/settings" element={<Settings />} />
