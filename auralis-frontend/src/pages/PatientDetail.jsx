@@ -10,7 +10,7 @@ import {
     LineChart, Line, XAxis, YAxis, CartesianGrid,
     Tooltip, ResponsiveContainer, AreaChart, Area
 } from 'recharts';
-import { fetchPatientById, fetchPatientVitals, fetchPatientTimeline, addVitals, fetchDiagnosis, fetchBills, fetchPatientMLTrends } from '../lib/api';
+import { fetchPatientById, fetchPatientVitals, fetchPatientTimeline, addVitals, fetchDiagnosis, fetchBills, fetchPatientMLTrends, fetchPatientRiskAssessment, fetchPatientRiskHistory } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { cn } from '../lib/utils';
 import { Plus, Save, X, LayoutGrid, LineChart as ChartIcon, History as HistoryIcon } from 'lucide-react';
@@ -26,8 +26,11 @@ const PatientDetail = () => {
     const [diagnosis, setDiagnosis] = useState([]);
     const [bills, setBills] = useState([]);
     const [mlTrends, setMlTrends] = useState({ anomalies: [], trends: [], summary: '' });
+    const [riskAssessment, setRiskAssessment] = useState({ risk_score: 0.15, status: 'Low' });
+    const [riskHistory, setRiskHistory] = useState([]);
     const [loading, setLoading] = useState(true);
     const [vitalsViewMode, setVitalsViewMode] = useState('grid'); // 'grid' or 'chart'
+    const [timeScale, setTimeScale] = useState('all'); // '24h', '7d', 'all'
     const { user } = useAuth();
 
     // Vitals Form State
@@ -35,6 +38,8 @@ const PatientDetail = () => {
     const [vitalsForm, setVitalsForm] = useState({
         hr: '',
         sbp: '',
+        dbp: '',
+        rr: '',
         temp: '',
         spo2: '',
         weight: '',
@@ -44,13 +49,15 @@ const PatientDetail = () => {
 
     const refreshData = async () => {
         try {
-            const [pData, vData, tData, dData, bData, mlData] = await Promise.all([
+            const [pData, vData, tData, dData, bData, mlData, rData, rhData] = await Promise.all([
                 fetchPatientById(id),
                 fetchPatientVitals(id),
                 fetchPatientTimeline(id),
                 fetchDiagnosis(id),
                 fetchBills(id),
-                fetchPatientMLTrends(id).catch(() => ({ anomalies: [], trends: [], summary: 'Analysis currently unavailable.' }))
+                fetchPatientMLTrends(id).catch(() => ({ anomalies: [], trends: [], summary: 'Analysis currently unavailable.' })),
+                fetchPatientRiskAssessment(id).catch(() => ({ risk_score: 0.15, status: 'Low' })),
+                fetchPatientRiskHistory(id).catch(() => [])
             ]);
             setPatient(pData);
             setVitals(vData);
@@ -58,6 +65,8 @@ const PatientDetail = () => {
             setDiagnosis(dData);
             setBills(bData);
             setMlTrends(mlData);
+            setRiskAssessment(rData);
+            setRiskHistory(rhData);
         } catch (error) {
             console.error("Failed to load clinical data:", error);
         }
@@ -69,6 +78,8 @@ const PatientDetail = () => {
             await addVitals(id, {
                 hr: parseInt(vitalsForm.hr),
                 sbp: parseInt(vitalsForm.sbp),
+                dbp: parseInt(vitalsForm.dbp),
+                rr: parseInt(vitalsForm.rr),
                 temp: parseFloat(vitalsForm.temp),
                 spo2: parseInt(vitalsForm.spo2),
                 weight: vitalsForm.weight ? parseFloat(vitalsForm.weight) : null,
@@ -76,8 +87,9 @@ const PatientDetail = () => {
                 note: vitalsForm.note
             });
             setShowVitalsModal(false);
-            setVitalsForm({ hr: '', sbp: '', temp: '', spo2: '', weight: '', height: '', note: '' });
+            setVitalsForm({ hr: '', sbp: '', dbp: '', rr: '', temp: '', spo2: '', weight: '', height: '', note: '' });
             await refreshData();
+            alert("Vitals synchronized successfully. Clinical state and risk analysis updated.");
         } catch (err) {
             alert("Failed to record vitals: " + err.message);
         }
@@ -97,6 +109,22 @@ const PatientDetail = () => {
 
     if (!patient) return <div>Patient not found.</div>;
 
+    const filterDataByScale = (data) => {
+        if (!data || data.length === 0) return [];
+        const now = new Date();
+        if (timeScale === '24h') {
+            const twentyFourHoursAgo = new Date(now.getTime() - (24 * 60 * 60 * 1000));
+            return data.filter(d => new Date(d.timestamp || d.time) >= twentyFourHoursAgo);
+        }
+        if (timeScale === '7d') {
+            const sevenDaysAgo = new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000));
+            return data.filter(d => new Date(d.timestamp || d.time) >= sevenDaysAgo);
+        }
+        return data;
+    };
+
+    const filteredVitals = filterDataByScale(vitals);
+    const filteredRiskHistory = filterDataByScale(riskHistory);
     const latestVitals = vitals.length > 0 ? vitals[vitals.length - 1] : { hr: '--', sbp: '--', spo2: '--', temp: '--' };
 
     return (
@@ -216,25 +244,45 @@ const PatientDetail = () => {
                     <div className="space-y-4">
                         <div className="flex items-center justify-between px-4">
                             <h3 className="text-xl font-black text-slate-800 tracking-tight">Physiological Telemetry</h3>
-                            <div className="flex items-center gap-1 bg-white/50 p-1 rounded-xl border border-white/20 backdrop-blur-sm">
-                                <button
-                                    onClick={() => setVitalsViewMode('grid')}
-                                    className={cn(
-                                        "p-2 rounded-lg transition-all flex items-center gap-2 text-[10px] font-black uppercase tracking-widest",
-                                        vitalsViewMode === 'grid' ? "bg-white text-primary shadow-sm" : "text-slate-400 hover:text-slate-600"
-                                    )}
-                                >
-                                    <LayoutGrid className="h-3.5 w-3.5" /> Grid
-                                </button>
-                                <button
-                                    onClick={() => setVitalsViewMode('chart')}
-                                    className={cn(
-                                        "p-2 rounded-lg transition-all flex items-center gap-2 text-[10px] font-black uppercase tracking-widest",
-                                        vitalsViewMode === 'chart' ? "bg-white text-primary shadow-sm" : "text-slate-400 hover:text-slate-600"
-                                    )}
-                                >
-                                    <ChartIcon className="h-3.5 w-3.5" /> Analytics
-                                </button>
+                            <div className="flex items-center gap-4">
+                                <div className="flex items-center gap-1 bg-white/50 p-1 rounded-xl border border-white/20 backdrop-blur-sm">
+                                    {[
+                                        { id: '24h', label: '24H' },
+                                        { id: '7d', label: '1W' },
+                                        { id: 'all', label: 'ALL' }
+                                    ].map(scale => (
+                                        <button
+                                            key={scale.id}
+                                            onClick={() => setTimeScale(scale.id)}
+                                            className={cn(
+                                                "px-3 py-1.5 rounded-lg transition-all text-[9px] font-black uppercase tracking-widest",
+                                                timeScale === scale.id ? "bg-slate-900 text-white shadow-sm" : "text-slate-400 hover:text-slate-600"
+                                            )}
+                                        >
+                                            {scale.label}
+                                        </button>
+                                    ))}
+                                </div>
+                                <div className="flex items-center gap-1 bg-white/50 p-1 rounded-xl border border-white/20 backdrop-blur-sm">
+                                    <button
+                                        onClick={() => setVitalsViewMode('grid')}
+                                        className={cn(
+                                            "p-2 rounded-lg transition-all flex items-center gap-2 text-[10px] font-black uppercase tracking-widest",
+                                            vitalsViewMode === 'grid' ? "bg-white text-primary shadow-sm" : "text-slate-400 hover:text-slate-600"
+                                        )}
+                                    >
+                                        <LayoutGrid className="h-3.5 w-3.5" /> Grid
+                                    </button>
+                                    <button
+                                        onClick={() => setVitalsViewMode('chart')}
+                                        className={cn(
+                                            "p-2 rounded-lg transition-all flex items-center gap-2 text-[10px] font-black uppercase tracking-widest",
+                                            vitalsViewMode === 'chart' ? "bg-white text-primary shadow-sm" : "text-slate-400 hover:text-slate-600"
+                                        )}
+                                    >
+                                        <ChartIcon className="h-3.5 w-3.5" /> Analytics
+                                    </button>
+                                </div>
                             </div>
                         </div>
 
@@ -273,7 +321,7 @@ const PatientDetail = () => {
                                             </div>
                                             <div className="h-12 w-full -mb-2 opacity-50">
                                                 <ResponsiveContainer width="100%" height="100%">
-                                                    <AreaChart data={vitals.slice(-12)}>
+                                                    <AreaChart data={filteredVitals.slice(-20)}>
                                                         <defs>
                                                             <linearGradient id={`grad-${i}`} x1="0" y1="0" x2="0" y2="1">
                                                                 <stop offset="5%" stopColor={stat.stroke} stopOpacity={0.2} />
@@ -302,7 +350,7 @@ const PatientDetail = () => {
                                     exit={{ opacity: 0, y: -10 }}
                                     className="glass-card rounded-[3rem] p-10 clinical-shadow border-white/40 h-[500px]"
                                 >
-                                    <VitalsChart data={vitals} patientId={id} />
+                                    <VitalsChart data={filteredVitals} patientId={id} />
                                 </motion.div>
                             )}
                         </AnimatePresence>
@@ -328,7 +376,7 @@ const PatientDetail = () => {
                             </div>
                             <div className="h-64 w-full">
                                 <ResponsiveContainer width="100%" height="100%">
-                                    <AreaChart data={[
+                                    <AreaChart data={filteredRiskHistory.length > 0 ? filteredRiskHistory : [
                                         { time: 'T-12', risk: 15 }, { time: 'T-10', risk: 20 }, { time: 'T-8', risk: 18 },
                                         { time: 'T-6', risk: 25 }, { time: 'T-4', risk: 45 }, { time: 'T-2', risk: 62 },
                                         { time: 'Today', risk: 85 },
@@ -340,10 +388,23 @@ const PatientDetail = () => {
                                             </linearGradient>
                                         </defs>
                                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                                        <XAxis dataKey="time" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#94a3b8' }} />
-                                        <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#94a3b8' }} />
+                                        <XAxis
+                                            dataKey="time"
+                                            axisLine={false}
+                                            tickLine={false}
+                                            tick={{ fontSize: 10, fill: '#94a3b8' }}
+                                            tickFormatter={(time) => {
+                                                try {
+                                                    return new Date(time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                                                } catch {
+                                                    return time;
+                                                }
+                                            }}
+                                        />
+                                        <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#94a3b8' }} domain={[0, 100]} />
                                         <Tooltip
                                             contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}
+                                            labelFormatter={(label) => new Date(label).toLocaleString()}
                                         />
                                         <Area
                                             type="monotone"
@@ -357,8 +418,15 @@ const PatientDetail = () => {
                                 </ResponsiveContainer>
                             </div>
                             <div className="mt-4 p-4 bg-secondary/30 rounded-xl flex items-center justify-between">
-                                <p className="text-sm font-medium">Rising Risk of Cardiac Event Detected</p>
-                                <span className="text-lg font-black text-red-600">85%</span>
+                                <p className="text-sm font-medium">Predicted Readmission Risk Score</p>
+                                <span className={cn(
+                                    "text-lg font-black",
+                                    riskAssessment.status === 'High' ? "text-rose-600" :
+                                        riskAssessment.status === 'Moderate' ? "text-amber-600" :
+                                            "text-emerald-600"
+                                )}>
+                                    {(riskAssessment.risk_score * 100).toFixed(1)}%
+                                </span>
                             </div>
                         </motion.div>
                         {/* Clinical Findings & Billing Context */}
@@ -466,9 +534,25 @@ const PatientDetail = () => {
                         </h3>
                         <div className="space-y-4">
                             {[
-                                { label: 'Acuity Level', value: 'High', color: 'text-red-600' },
-                                { label: 'Stability Index', value: '4.2/10', color: 'text-amber-600' },
-                                { label: 'Response Rate', value: 'Normal', color: 'text-emerald-600' },
+                                {
+                                    label: 'Acuity Level',
+                                    value: riskAssessment.status || 'Low',
+                                    color: riskAssessment.status === 'High' ? 'text-rose-600' :
+                                        riskAssessment.status === 'Moderate' ? 'text-amber-600' :
+                                            'text-emerald-600'
+                                },
+                                {
+                                    label: 'Stability Index',
+                                    value: riskAssessment.stability_index || '10/10',
+                                    color: (parseInt(riskAssessment.stability_index) < 5) ? 'text-red-600' : 'text-emerald-600'
+                                },
+                                {
+                                    label: 'Response Rate',
+                                    value: riskAssessment.response_rate || 'Normal',
+                                    color: riskAssessment.response_rate === 'Declining' ? 'text-red-600' :
+                                        riskAssessment.response_rate === 'Positive' ? 'text-emerald-600' :
+                                            'text-blue-600'
+                                },
                             ].map(item => (
                                 <div key={item.label} className="flex justify-between items-center py-2 border-b border-border last:border-0">
                                     <span className="text-sm text-muted-foreground">{item.label}</span>
@@ -482,18 +566,25 @@ const PatientDetail = () => {
                     <div className="bg-card rounded-2xl border border-border p-6 shadow-sm">
                         <h3 className="font-bold mb-4">Recent Findings</h3>
                         <ul className="space-y-3">
-                            <li className="flex gap-3 text-xs leading-relaxed">
-                                <span className="h-1.5 w-1.5 rounded-full bg-primary mt-1 flex-shrink-0" />
-                                <span>Elevated HR (120 bpm) persistent for last 30 mins.</span>
-                            </li>
-                            <li className="flex gap-3 text-xs leading-relaxed">
-                                <span className="h-1.5 w-1.5 rounded-full bg-primary mt-1 flex-shrink-0" />
-                                <span>ST-segment depression observed on ECG monitor.</span>
-                            </li>
-                            <li className="flex gap-3 text-xs leading-relaxed">
-                                <span className="h-1.5 w-1.5 rounded-full bg-primary mt-1 flex-shrink-0" />
-                                <span>No response to sublingual nitroglycerin.</span>
-                            </li>
+                            {mlTrends.anomalies && mlTrends.anomalies.length > 0 ? (
+                                mlTrends.anomalies.slice(0, 3).map((anomaly, idx) => (
+                                    <li key={idx} className="flex gap-3 text-xs leading-relaxed">
+                                        <span className={cn(
+                                            "h-1.5 w-1.5 rounded-full mt-1 flex-shrink-0",
+                                            anomaly.severity === 'High' ? "bg-red-500" : "bg-amber-500"
+                                        )} />
+                                        <span>
+                                            <span className="font-bold uppercase">{anomaly.type} IN {anomaly.label}:</span>{' '}
+                                            Recent reading of {anomaly.value} detected.
+                                        </span>
+                                    </li>
+                                ))
+                            ) : (
+                                <li className="flex gap-3 text-xs leading-relaxed italic text-muted-foreground">
+                                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 mt-1 flex-shrink-0" />
+                                    <span>Physiological stability within normal limits. No acute anomalies detected.</span>
+                                </li>
+                            )}
                         </ul>
                     </div>
                 </div>
@@ -514,20 +605,20 @@ const PatientDetail = () => {
                             initial={{ scale: 0.9, opacity: 0, y: 20 }}
                             animate={{ scale: 1, opacity: 1, y: 0 }}
                             exit={{ scale: 0.9, opacity: 0, y: 20 }}
-                            className="relative w-full max-w-2xl bg-card rounded-[2.5rem] p-10 clinical-shadow border border-white/40 overflow-hidden"
+                            className="relative w-full max-w-2xl bg-card rounded-[2.5rem] p-10 clinical-shadow border border-white/40 overflow-hidden flex flex-col max-h-[90vh]"
                         >
-                            <div className="absolute top-0 right-0 p-8">
+                            <div className="absolute top-0 right-0 p-8 z-10">
                                 <button onClick={() => setShowVitalsModal(false)} className="p-3 hover:bg-slate-100 rounded-2xl transition-all">
                                     <X className="h-6 w-6 text-slate-400" />
                                 </button>
                             </div>
 
-                            <div className="mb-10">
+                            <div className="mb-6 flex-shrink-0">
                                 <h2 className="text-4xl font-black tracking-tighter mb-2">Sync Clinical Telemetry</h2>
                                 <p className="text-lg font-bold text-muted-foreground italic">Update patient vital signs for real-time risk assessment.</p>
                             </div>
 
-                            <form onSubmit={handleAddVitals} className="space-y-8">
+                            <form onSubmit={handleAddVitals} className="space-y-8 overflow-y-auto no-scrollbar pr-2 flex-1 pb-4">
                                 <div className="grid grid-cols-2 gap-6">
                                     <div className="space-y-3">
                                         <label className="text-sm font-black text-muted-foreground uppercase tracking-widest pl-2">Heart Rate (BPM)</label>
@@ -547,6 +638,26 @@ const PatientDetail = () => {
                                             onChange={(e) => setVitalsForm({ ...vitalsForm, sbp: e.target.value })}
                                             className="w-full p-5 rounded-2xl border-2 border-slate-50 bg-slate-50 focus:bg-white focus:border-indigo-500 outline-none font-black text-xl"
                                             placeholder="120"
+                                        />
+                                    </div>
+                                    <div className="space-y-3">
+                                        <label className="text-sm font-black text-muted-foreground uppercase tracking-widest pl-2">Diastolic BP (mmHg)</label>
+                                        <input
+                                            type="number" required
+                                            value={vitalsForm.dbp}
+                                            onChange={(e) => setVitalsForm({ ...vitalsForm, dbp: e.target.value })}
+                                            className="w-full p-5 rounded-2xl border-2 border-slate-50 bg-slate-50 focus:bg-white focus:border-indigo-500 outline-none font-black text-xl"
+                                            placeholder="80"
+                                        />
+                                    </div>
+                                    <div className="space-y-3">
+                                        <label className="text-sm font-black text-muted-foreground uppercase tracking-widest pl-2">Resp. Rate (BPM)</label>
+                                        <input
+                                            type="number" required
+                                            value={vitalsForm.rr}
+                                            onChange={(e) => setVitalsForm({ ...vitalsForm, rr: e.target.value })}
+                                            className="w-full p-5 rounded-2xl border-2 border-slate-50 bg-slate-50 focus:bg-white focus:border-indigo-500 outline-none font-black text-xl"
+                                            placeholder="18"
                                         />
                                     </div>
                                     <div className="space-y-3">

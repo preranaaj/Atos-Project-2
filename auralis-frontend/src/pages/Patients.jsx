@@ -7,16 +7,20 @@ import { useAuth } from '../context/AuthContext';
 
 const StatusBadge = ({ status }) => {
     const styles = {
-        Critical: 'bg-red-500/10 text-red-600 border-red-200/50',
         Stable: 'bg-emerald-500/10 text-emerald-600 border-emerald-200/50',
+        Low: 'bg-emerald-500/10 text-emerald-600 border-emerald-200/50',
+        Moderate: 'bg-amber-500/10 text-amber-600 border-amber-200/50',
         Observation: 'bg-amber-500/10 text-amber-600 border-amber-200/50',
+        High: 'bg-rose-500/10 text-rose-600 border-rose-200/50',
         Discharged: 'bg-slate-500/10 text-slate-600 border-slate-200/50',
     };
 
     const icons = {
-        Critical: AlertCircle,
         Stable: CheckCircle2,
+        Low: CheckCircle2,
+        Moderate: Clock,
         Observation: Clock,
+        High: AlertCircle,
         Discharged: User
     };
 
@@ -38,17 +42,14 @@ const PatientModal = ({ isOpen, onClose, onSubmit, initialData = null, title = "
         condition: '',
         status: 'Stable',
         ward: 'General Ward',
-        risk: 'Low',
-        blood_type: 'O+',
-        ml_risk_score: 0.15
+        blood_type: 'O+'
     });
 
     useEffect(() => {
         if (initialData) {
             setFormData({
                 ...initialData,
-                blood_type: initialData.blood_type || 'O+',
-                ml_risk_score: initialData.ml_risk_score || 0.15
+                blood_type: initialData.blood_type || 'O+'
             });
         } else {
             setFormData({
@@ -58,9 +59,7 @@ const PatientModal = ({ isOpen, onClose, onSubmit, initialData = null, title = "
                 condition: '',
                 status: 'Stable',
                 ward: 'General Ward',
-                risk: 'Low',
-                blood_type: 'O+',
-                ml_risk_score: 0.15
+                blood_type: 'O+'
             });
         }
     }, [initialData, isOpen]);
@@ -129,7 +128,6 @@ const PatientModal = ({ isOpen, onClose, onSubmit, initialData = null, title = "
                                 className="w-full bg-secondary/30 border border-border rounded-xl px-4 py-2 focus:ring-2 focus:ring-primary/20 outline-none"
                             >
                                 <option value="Stable">Stable</option>
-                                <option value="Critical">Critical</option>
                                 <option value="Observation">Observation</option>
                                 <option value="Discharged">Discharged</option>
                             </select>
@@ -147,56 +145,28 @@ const PatientModal = ({ isOpen, onClose, onSubmit, initialData = null, title = "
                         />
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-1.5">
-                            <label className="text-sm font-medium text-muted-foreground">Ward / Location</label>
-                            <input
-                                required
-                                value={formData.ward}
-                                onChange={(e) => setFormData({ ...formData, ward: e.target.value })}
-                                className="w-full bg-secondary/30 border border-border rounded-xl px-4 py-2 focus:ring-2 focus:ring-primary/20 outline-none"
-                                placeholder="e.g. Ward B"
-                            />
-                        </div>
-                        <div className="space-y-1.5">
-                            <label className="text-sm font-medium text-muted-foreground">Risk Level</label>
-                            <select
-                                value={formData.risk}
-                                onChange={(e) => setFormData({ ...formData, risk: e.target.value })}
-                                className="w-full bg-secondary/30 border border-border rounded-xl px-4 py-2 focus:ring-2 focus:ring-primary/20 outline-none"
-                            >
-                                <option value="Low">Low</option>
-                                <option value="Moderate">Moderate</option>
-                                <option value="High">High</option>
-                            </select>
-                        </div>
+                    <div className="space-y-1.5">
+                        <label className="text-sm font-medium text-muted-foreground">Ward / Location</label>
+                        <input
+                            required
+                            value={formData.ward}
+                            onChange={(e) => setFormData({ ...formData, ward: e.target.value })}
+                            className="w-full bg-secondary/30 border border-border rounded-xl px-4 py-2 focus:ring-2 focus:ring-primary/20 outline-none"
+                            placeholder="e.g. Ward B"
+                        />
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-1.5">
-                            <label className="text-sm font-medium text-muted-foreground">Blood Type</label>
-                            <select
-                                value={formData.blood_type}
-                                onChange={(e) => setFormData({ ...formData, blood_type: e.target.value })}
-                                className="w-full bg-secondary/30 border border-border rounded-xl px-4 py-2 focus:ring-2 focus:ring-primary/20 outline-none"
-                            >
-                                {['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].map(type => (
-                                    <option key={type} value={type}>{type}</option>
-                                ))}
-                            </select>
-                        </div>
-                        <div className="space-y-1.5">
-                            <label className="text-sm font-medium text-muted-foreground">ML Risk Probability (0-1)</label>
-                            <input
-                                type="number"
-                                step="0.01"
-                                min="0"
-                                max="1"
-                                value={formData.ml_risk_score}
-                                onChange={(e) => setFormData({ ...formData, ml_risk_score: parseFloat(e.target.value) })}
-                                className="w-full bg-secondary/30 border border-border rounded-xl px-4 py-2 focus:ring-2 focus:ring-primary/20 outline-none"
-                            />
-                        </div>
+                    <div className="space-y-1.5">
+                        <label className="text-sm font-medium text-muted-foreground">Blood Type</label>
+                        <select
+                            value={formData.blood_type}
+                            onChange={(e) => setFormData({ ...formData, blood_type: e.target.value })}
+                            className="w-full bg-secondary/30 border border-border rounded-xl px-4 py-2 focus:ring-2 focus:ring-primary/20 outline-none"
+                        >
+                            {['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].map(type => (
+                                <option key={type} value={type}>{type}</option>
+                            ))}
+                        </select>
                     </div>
 
                     <div className="flex gap-3 pt-4">
@@ -283,7 +253,7 @@ const Patients = () => {
         const nameMatch = patient.name.toLowerCase().includes(searchTerm.toLowerCase());
         const condMatch = patient.condition?.toLowerCase().includes(searchTerm.toLowerCase());
         const matchesSearch = nameMatch || condMatch;
-        const matchesFilter = filter === 'All' || patient.status === filter;
+        const matchesFilter = filter === 'All' || patient.status === filter || patient.risk === filter;
         return matchesSearch && matchesFilter;
     });
 
@@ -320,7 +290,7 @@ const Patients = () => {
                         />
                     </div>
                     <div className="flex gap-2 bg-secondary/30 p-2 rounded-2xl overflow-x-auto no-scrollbar">
-                        {['All', 'Critical', 'Stable', 'Observation', 'Discharged'].map((f) => (
+                        {['All', 'High', 'Moderate', 'Stable', 'Discharged'].map((f) => (
                             <button
                                 key={f}
                                 onClick={() => setFilter(f)}
@@ -384,7 +354,7 @@ const Patients = () => {
                                                 </div>
                                             </td>
                                             <td className="px-6 py-5 text-center">
-                                                <span className={`text-sm font-black px-4 py-1.5 rounded-xl uppercase tracking-tighter ${patient.risk === 'High' ? 'text-rose-600 bg-rose-50 border border-rose-100' :
+                                                <span className={`text-sm font-black px-4 py-1.5 rounded-xl uppercase tracking-tighter ${patient.risk === 'High' ? 'text-rose-600 bg-rose-50 border border-rose-100 shadow-sm' :
                                                     patient.risk === 'Moderate' ? 'text-amber-600 bg-amber-50 border border-amber-100' :
                                                         'text-emerald-600 bg-emerald-50 border border-emerald-100'
                                                     }`}>

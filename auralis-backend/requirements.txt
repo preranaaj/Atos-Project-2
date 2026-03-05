@@ -9,3 +9,6 @@ passlib[bcrypt]
 bcrypt
 pydantic
 python-multipart
+joblib
+scikit-learn
+xgboost

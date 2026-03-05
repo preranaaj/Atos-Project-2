@@ -9,6 +9,14 @@ import motor.motor_asyncio
 from passlib.context import CryptContext
 from datetime import datetime
 from dotenv import load_dotenv
+import hmac
+import hashlib
+import json
+from fastapi import WebSocket, WebSocketDisconnect
+from rule_engine import engine as clinical_rule_engine
+from fhir_models import FHIRPatient, FHIRObservation, FHIRIdentifier, FHIRCodeableConcept, FHIRCoding, FHIRQuantity
+from ml_engine import ml_predictor
+from bson import ObjectId
 
 load_dotenv()
 
@@ -58,6 +66,25 @@ MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/auralis_db")
 # Database Init
 client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URI, tlsCAFile=certifi.where())
 db = client.auralis_db
+SECRET_KEY = os.getenv("SECRET_KEY", "auralis-secure-key-2024")
+
+# WebSocket Manager
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: dict):
+        for connection in self.active_connections:
+            await connection.send_json(message)
+
+manager = ConnectionManager()
 
 # Models
 class UserCreate(BaseModel):
@@ -191,13 +218,18 @@ class AuditLogCreate(BaseModel):
     details: Optional[str] = ""
 
 async def log_action(username: str, action: str, role: str, user_id: str = "system", details: str = ""):
+    log_data = f"{username}|{action}|{role}|{user_id}|{details}|{datetime.utcnow().isoformat()}"
+    signature = hmac.new(SECRET_KEY.encode(), log_data.encode(), hashlib.sha256).hexdigest()
+    
     log_entry = {
         "user_id": user_id,
         "username": username,
         "role": role,
         "action": action,
         "details": details,
-        "timestamp": datetime.utcnow()
+        "timestamp": datetime.utcnow(),
+        "signature": signature,
+        "integrity_v": "v1.hmac-sha256"
     }
     await db.audit_logs.insert_one(log_entry)
 
@@ -563,14 +595,150 @@ async def add_vitals(patient_id: str, vitals: VitalsCreate):
     
     await db.vitals.insert_one(vitals_dict)
     
-    # Also update patient's lastCheck
-    from bson import ObjectId
+    # Trigger Rule Engine
+    alerts = clinical_rule_engine.process_vitals(vitals_dict)
+    if alerts:
+        for alert in alerts:
+            await log_action(
+                username="RuleEngine",
+                action="Clinical Alert",
+                role="System",
+                details=f"Patient {patient_id}: {alert['message']}"
+            )
+            # Broadcast alert via WebSocket
+            await manager.broadcast({"type": "ALERT", "patient_id": patient_id, "data": alert})
+
+    # Broadcast vitals via WebSocket
+    await manager.broadcast({
+        "type": "VITALS_UPDATE",
+        "patient_id": patient_id,
+        "data": vitals_dict
+    })
+
+    # Recalculate ML Risk and Update Patient Record
+    vitals_history = await get_patient_vitals(patient_id)
+    risk_prob = ml_predictor.predict_readmission(vitals_history)
+    
+    status = "Low"
+    if risk_prob > 0.4: status = "High"
+    elif risk_prob > 0.25: status = "Moderate"
+
+    update_patient_data = {
+        "lastCheck": str(datetime.utcnow()),
+        "ml_risk_score": risk_prob,
+        "risk": status,
+        "status": status # Sync primary status (Low, Moderate, High)
+    }
+
     try:
-        await db.patients.update_one({"_id": ObjectId(patient_id)}, {"$set": {"lastCheck": str(datetime.utcnow())}})
-    except:
-        await db.patients.update_one({"id": patient_id}, {"$set": {"lastCheck": str(datetime.utcnow())}})
+        # Try updating by _id first if it looks like an ObjectId
+        if len(patient_id) == 24:
+            await db.patients.update_one({"_id": ObjectId(patient_id)}, {"$set": update_patient_data})
+        # Always try updating by 'id' as a fallback or if it's a MIMIC-style ID
+        await db.patients.update_one({"id": patient_id}, {"$set": update_patient_data})
+    except Exception as e:
+        print(f"Error updating patient clinical state: {e}")
         
-    return {"message": "Vitals recorded successfully", "timestamp": vitals_dict["timestamp"]}
+    return {
+        "message": "Vitals recorded and clinical state updated", 
+        "timestamp": vitals_dict["timestamp"], 
+        "alerts": len(alerts),
+        "new_risk_score": round(risk_prob, 4),
+        "new_status": status
+    }
+
+# WebSocket Endpoint
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            # Keep connection alive, though mainly server-to-client
+            data = await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+
+# FHIR-compliant Endpoints
+@app.post("/fhir/Patient")
+async def create_fhir_patient(patient: FHIRPatient):
+    patient_dict = patient.model_dump()
+    patient_dict["created_at"] = datetime.utcnow()
+    # Map FHIR fields to our internal database structure if needed, or store as-is
+    result = await db.patients_fhir.insert_one(patient_dict)
+    return {"id": str(result.inserted_id), "resource": patient}
+
+@app.get("/fhir/Observation/{patient_id}")
+async def get_fhir_observations(patient_id: str):
+    observations = []
+    async for obs in db.vitals.find({"patient_id": patient_id}):
+        # Map our internal vitals to FHIRObservation
+        fhir_obs = FHIRObservation(
+            status="final",
+            code=FHIRCodeableConcept(coding=[FHIRCoding(system="http://loinc.org", code="8867-4", display="Heart rate")]),
+            subject={"reference": f"Patient/{patient_id}"},
+            effectiveDateTime=obs["timestamp"],
+            valueQuantity=FHIRQuantity(value=float(obs["hr"]), unit="beats/minute", code="/min")
+        )
+        observations.append(fhir_obs)
+    return observations
+
+@app.get("/patients/{patient_id}/risk-assessment")
+async def get_patient_risk_assessment(patient_id: str):
+    vitals_history = await get_patient_vitals(patient_id)
+    if not vitals_history:
+        return {
+            "risk_score": 0.15, 
+            "status": "Low", 
+            "stability_index": "10/10",
+            "response_rate": "Stable",
+            "message": "Baseline risk (insufficient data)"
+        }
+    
+    # Aggregated features and ML prediction
+    risk_prob = ml_predictor.predict_readmission(vitals_history)
+    
+    status = "Low"
+    if risk_prob > 0.4: status = "High"
+    elif risk_prob > 0.25: status = "Moderate"
+    
+    # Calculate Stability Index (0-10) based on inverse of normalized std dev
+    if len(vitals_history) > 2:
+        df_v = pd.DataFrame(vitals_history)
+        # Weighting SPO2 volatility more as it's more critical
+        vols = []
+        for col in ['hr', 'sbp', 'spo2']:
+            if col in df_v.columns:
+                std = df_v[col].tail(5).std()
+                mean = df_v[col].mean()
+                vols.append(min(1.0, std / (mean * 0.15) if mean > 0 else 0))
+        
+        avg_vol = np.mean(vols) if vols else 0
+        stability = max(0, 10 - round(avg_vol * 10, 1))
+    else:
+        stability = 10.0
+
+    # Calculate Response Rate
+    # If risk is decreasing, response is positive
+    response_rate = "Normal"
+    if len(vitals_history) >= 3:
+        # Simple trend check: is the latest vital better than the average of previous?
+        latest = vitals_history[-1]
+        prev_mean_hr = np.mean([v['hr'] for v in vitals_history[-5:-1]])
+        if latest['hr'] < prev_mean_hr and latest['spo2'] > 95:
+            response_rate = "Positive"
+        elif latest['hr'] > prev_mean_hr + 10:
+            response_rate = "Declining"
+
+    return {
+        "patient_id": patient_id,
+        "risk_score": round(risk_prob, 4),
+        "status": status,
+        "stability_index": f"{stability}/10",
+        "response_rate": response_rate,
+        "prediction_target": "30-day Readmission",
+        "timestamp": datetime.utcnow(),
+        "model_version": "v1.0.rf-longitudinal"
+    }
 
 @app.get("/patients/{patient_id}/vitals")
 async def get_patient_vitals(patient_id: str):
@@ -604,32 +772,21 @@ async def get_patient_vitals(patient_id: str):
                 "avpu": int(row['avpu'])
             })
     
-    # 3. Simulated data if both empty
-    if not db_vitals and not csv_vitals:
-        history = []
-        import random
-        from datetime import timedelta
-        now = datetime.now()
-        for i in range(10):
-            time_point = now - timedelta(hours=(10-i)*2)
-            history.append({
-                "timestamp": str(time_point),
-                "hr": random.randint(70, 95),
-                "rr": random.randint(14, 22),
-                "sbp": random.randint(110, 140),
-                "temp": round(random.uniform(97.5, 99.5), 1),
-                "spo2": random.randint(94, 100),
-                "avpu": 0
-            })
-        return history
+    # 3. Combine and Return
+    all_vitals = csv_vitals + db_vitals
+    if not all_vitals:
+        return []
         
-    return csv_vitals + db_vitals
+    return all_vitals
 
 @app.get("/patients/{patient_id}/ml-trends")
 async def get_patient_ml_trends(patient_id: str):
     vitals_data = await get_patient_vitals(patient_id)
-    if not vitals_data or len(vitals_data) < 3:
-        return {"anomalies": [], "trends": [], "summary": "Insufficient data for ML analysis."}
+    if not vitals_data:
+        return {"anomalies": [], "trends": [], "summary": "No clinical data available."}
+    
+    if len(vitals_data) < 3:
+        return {"anomalies": [], "trends": [], "summary": "Initial baseline established. Monitoring for physiological shifts."}
 
     v_df = pd.DataFrame(vitals_data)
     v_df['timestamp'] = pd.to_datetime(v_df['timestamp'])
@@ -693,6 +850,59 @@ async def get_patient_ml_trends(patient_id: str):
         "summary": summary,
         "ml_version": "v1.0.anomaly-z"
     }
+
+@app.get("/patients/{patient_id}/risk-history")
+async def get_patient_risk_history(patient_id: str):
+    vitals_data = await get_patient_vitals(patient_id)
+    if not vitals_data:
+        return []
+
+    # Create a history of risk scores by processing vitals in sliding windows
+    risk_history = []
+    
+    # Sort vitals by timestamp
+    vitals_data.sort(key=lambda x: x['timestamp'])
+    
+    # Generate points: 3 historical points from the past, and up to 4 points from recent data
+    # (The goal is to show the 'current' trend more clearly)
+    
+    # 1. Historical points (coarse)
+    historical_count = min(3, len(vitals_data) // 2)
+    if historical_count > 0:
+        step = len(vitals_data) // historical_count
+        for i in range(0, len(vitals_data) - 5, step):
+            subset = vitals_data[:i+1]
+            score = ml_predictor.predict_readmission(subset)
+            risk_history.append({
+                "time": vitals_data[i]['timestamp'],
+                "risk": round(score * 100, 1),
+                "status": "Critical" if score > 0.7 else "High" if score > 0.4 else "Medium" if score > 0.25 else "Low"
+            })
+
+    # 2. Recent points (granular) - Last 5 observations
+    recent_vitals = vitals_data[-5:]
+    start_idx = max(0, len(vitals_data) - 5)
+    for i, _ in enumerate(recent_vitals):
+        subset = vitals_data[:start_idx + i + 1]
+        score = ml_predictor.predict_readmission(subset)
+        risk_history.append({
+            "time": subset[-1]['timestamp'],
+            "risk": round(score * 100, 1),
+            "status": "Critical" if score > 0.7 else "High" if score > 0.4 else "Medium" if score > 0.25 else "Low"
+        })
+    
+    # Sort and Deduplicate by timestamp
+    seen = set()
+    unique_history = []
+    # Ensure items are sorted correctly before deduplication
+    sorted_history = sorted(risk_history, key=lambda x: str(x['time']))
+    for item in sorted_history:
+        ts = str(item['time'])
+        if ts not in seen:
+            unique_history.append(item)
+            seen.add(ts)
+            
+    return unique_history[-10:] 
 
 @app.get("/patients/{patient_id}/timeline")
 async def get_patient_timeline(patient_id: str):

@@ -190,3 +190,15 @@ export const fetchPatientMLTrends = async (id) => {
     if (!response.ok) throw new Error('Failed to fetch ML trends');
     return response.json();
 };
+
+export const fetchPatientRiskAssessment = async (id) => {
+    const response = await fetch(`${BASE_URL}/patients/${id}/risk-assessment`);
+    if (!response.ok) throw new Error('Failed to fetch risk assessment');
+    return response.json();
+};
+
+export const fetchPatientRiskHistory = async (id) => {
+    const response = await fetch(`${BASE_URL}/patients/${id}/risk-history`);
+    if (!response.ok) throw new Error('Failed to fetch risk history');
+    return response.json();
+};
